@@ -10,10 +10,10 @@ import (
 	"time"
 )
 
-func MigrateBDT2UTC(collection *mongo.Collection, maxUpdates int, fieldsToProcess []string) {
+func MigrateBDT2UTC(collection *mongo.Collection, maxUpdates int, fieldsToProcess []string, filter bson.M) {
 
-	// Step 1: Fetch all documents
-	cursor, err := collection.Find(context.TODO(), bson.M{})
+	// Step 1: Fetch all documents that match the filter
+	cursor, err := collection.Find(context.TODO(), filter)
 	if err != nil {
 		log.Fatal("Failed to fetch documents:", err)
 	}
