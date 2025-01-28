@@ -10,78 +10,90 @@ import (
 	"time"
 )
 
-func MigrateBDT2UTC(collection *mongo.Collection, objectID primitive.ObjectID) {
-	// Find the documents with the specific ObjectID
-	cursor, err := collection.Find(context.Background(), bson.M{"_id": objectID})
+func MigrateBDT2UTC(collection *mongo.Collection, maxUpdates int, fieldsToProcess []string) {
+
+	// Step 1: Fetch all documents
+	cursor, err := collection.Find(context.TODO(), bson.M{})
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("Failed to fetch documents:", err)
 	}
-	defer cursor.Close(context.Background())
+	defer cursor.Close(context.TODO())
 
-	// Iterate over the documents
-	for cursor.Next(context.Background()) {
-		var doc struct {
-			ID                      primitive.ObjectID `bson:"_id"`
-			StartDate               time.Time          `bson:"start_date"`
-			EndDate                 time.Time          `bson:"end_date"`
-			CreatedAt               time.Time          `bson:"created_at"`
-			UpdatedAt               time.Time          `bson:"updated_at"`
-			ClassStartDate          time.Time          `bson:"class_start_date"`
-			ClassEndDate            time.Time          `bson:"class_end_date"`
-			ContentAccessExpiryDate time.Time          `bson:"content_access_expiry_date"`
+	// Counter to track the number of updates
+	updateCount := 0
+
+	// Step 2: Iterate over each document
+	for cursor.Next(context.TODO()) {
+		// Stop if the maximum number of updates is reached (if maxUpdates is set to -1, it will update all documents)
+		if updateCount >= maxUpdates && maxUpdates != -1 {
+			fmt.Printf("Stopped after updating %d documents (maxUpdates limit reached).\n", maxUpdates)
+			break
 		}
 
-		if err := cursor.Decode(&doc); err != nil {
-			log.Fatal(err)
+		var result bson.M
+		if err := cursor.Decode(&result); err != nil {
+			log.Fatal("Failed to decode document:", err)
 		}
 
-		// Prepare updated fields, only including non-null and non-undefined values
-		updatedFields := bson.M{}
+		// Step 3: Prepare the update payload
+		updatePayload := bson.M{}
 
-		// Subtract 6 hours from each date
-		adjustTime := func(t time.Time) time.Time {
-			return t.Add(-6 * time.Hour)
-		}
+		// Flag to track if any field was updated
+		hasUpdates := false
 
-		if !doc.StartDate.IsZero() {
-			updatedFields["start_date"] = adjustTime(doc.StartDate)
-		}
-		if !doc.EndDate.IsZero() {
-			updatedFields["end_date"] = adjustTime(doc.EndDate)
-		}
-		if !doc.CreatedAt.IsZero() {
-			updatedFields["created_at"] = adjustTime(doc.CreatedAt)
-		}
-		if !doc.UpdatedAt.IsZero() {
-			updatedFields["updated_at"] = adjustTime(doc.UpdatedAt)
-		}
-		if !doc.ClassStartDate.IsZero() {
-			updatedFields["class_start_date"] = adjustTime(doc.ClassStartDate)
-		}
-		if !doc.ClassEndDate.IsZero() {
-			updatedFields["class_end_date"] = adjustTime(doc.ClassEndDate)
-		}
-		if !doc.ContentAccessExpiryDate.IsZero() {
-			updatedFields["content_access_expiry_date"] = adjustTime(doc.ContentAccessExpiryDate)
-		}
-
-		// Only perform an update if there are fields to update
-		if len(updatedFields) > 0 {
-			// Perform the update
-			_, err := collection.UpdateOne(
-				context.Background(),
-				bson.M{"_id": doc.ID},
-				bson.M{"$set": updatedFields},
-			)
-			if err != nil {
-				log.Fatal(err)
+		// Step 4: Process each field
+		for _, field := range fieldsToProcess {
+			// Check if the field exists in the document
+			fieldValue, ok := result[field]
+			if !ok {
+				fmt.Printf("Skipping field %s in document %v: field is missing.\n", field, result["_id"])
+				continue
 			}
-			fmt.Printf("Updated document with _id: %s\n", doc.ID.Hex())
+
+			// Ensure the field is a valid timestamp
+			dateTime, ok := fieldValue.(primitive.DateTime)
+			if !ok {
+				fmt.Printf("Skipping field %s in document %v: field is not a valid timestamp.\n", field, result["_id"])
+				continue
+			}
+
+			// Convert primitive.DateTime to time.Time
+			currentTime := dateTime.Time()
+
+			// Subtract 6 hours (adjust as needed for your timezone conversion)
+			newTime := currentTime.Add(-6 * time.Hour)
+
+			// Add the updated field to the payload
+			updatePayload[field] = newTime
+			hasUpdates = true
+		}
+
+		// Step 5: Skip if no fields were updated
+		if !hasUpdates {
+			fmt.Printf("No fields updated for document %v.\n", result["_id"])
+			continue
+		}
+
+		// Step 6: Update the document with the new fields
+		filter := bson.M{"_id": result["_id"]}
+		update := bson.M{"$set": updatePayload}
+
+		updateResult, err := collection.UpdateOne(context.TODO(), filter, update)
+		if err != nil {
+			log.Fatal("Failed to update document:", err)
+		}
+
+		if updateResult.MatchedCount == 0 {
+			fmt.Println("No document matched the filter for document:", result["_id"])
+		} else {
+			fmt.Printf("Matched %v document(s) and updated %v document(s) for document: %v\n", updateResult.MatchedCount, updateResult.ModifiedCount, result["_id"])
+			updateCount++
 		}
 	}
 
-	// Handle any cursor errors
 	if err := cursor.Err(); err != nil {
-		log.Fatal(err)
+		log.Fatal("Cursor error:", err)
 	}
+
+	log.Printf("Migration completed. Updated %d documents.\n", updateCount)
 }
