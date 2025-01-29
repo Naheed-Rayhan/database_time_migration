@@ -3,6 +3,7 @@ package Utils
 import (
 	"context"
 	"fmt"
+	"github.com/arangodb/go-driver/v2/arangodb"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -10,7 +11,7 @@ import (
 	"time"
 )
 
-func MigrateBDT2UTC(collection *mongo.Collection, maxUpdates int, fieldsToProcess []string, filter bson.M) {
+func MigrateBDT2UTC_mongoDB(collection *mongo.Collection, maxUpdates int, fieldsToProcess []string, filter bson.M) {
 
 	// Step 1: Fetch all documents that match the filter
 	cursor, err := collection.Find(context.TODO(), filter)
@@ -96,4 +97,68 @@ func MigrateBDT2UTC(collection *mongo.Collection, maxUpdates int, fieldsToProces
 	}
 
 	log.Printf("Migration completed. Updated %d documents.\n", updateCount)
+}
+
+func MigrateBDT2UTC_arangoDB(ctx context.Context, fieldsToProcess []string, maxUpdates int, db arangodb.Database, collection arangodb.Collection, collectionName string) {
+	filterConditions := ""
+	for i, field := range fieldsToProcess {
+		if i > 0 {
+			filterConditions += " AND "
+		}
+		filterConditions += fmt.Sprintf("doc.%s != null", field)
+	}
+
+	//query := fmt.Sprintf("FOR doc IN %s FILTER %s AND doc.id == \"%s\" RETURN doc", collectionName, filterConditions, "005X04AV19")
+	query := fmt.Sprintf("FOR doc IN %s FILTER %s RETURN doc", collectionName, filterConditions)
+	fmt.Println(query)
+
+	cursor, err := db.Query(ctx, query, nil)
+	if err != nil {
+		log.Fatalf("Query failed: %v", err)
+	}
+	defer cursor.Close()
+
+	updateCount := 0
+
+	// Iterate over the cursor to process each document
+	for cursor.HasMore() {
+
+		// Stop if we've reached the maximum number of updates (if maxUpdates is set to -1, it will update all documents)
+		if updateCount >= maxUpdates && maxUpdates != -1 {
+			log.Println("Stopped after updating", maxUpdates, "documents (maxUpdates limit reached).")
+			break
+		}
+
+		var doc map[string]interface{}
+		meta, err := cursor.ReadDocument(ctx, &doc)
+		if err != nil {
+			log.Printf("Failed to read document: %v", err)
+			continue
+		}
+
+		// Process each field to convert BDT to UTC
+		for _, field := range fieldsToProcess {
+			fieldTime, err := time.Parse(time.RFC3339, doc[field].(string))
+			if err != nil {
+				log.Printf("Error parsing time for document %s: %v", meta.Key, err)
+				continue
+			}
+			// Subtract 6 hours to convert BDT to UTC
+			doc[field] = fieldTime.Add(-6 * time.Hour).Format(time.RFC3339)
+		}
+
+		// Update the document in the collection
+		_, err = collection.UpdateDocument(ctx, meta.Key, doc)
+		if err != nil {
+			log.Printf("Failed to update document %s: %v", meta.Key, err)
+		} else {
+			fmt.Printf("Updated document %s with new times\n", meta.Key)
+			updateCount++
+		}
+
+	}
+
+	log.Printf("Total documents updated: %d\n", updateCount)
+	log.Println("arangoDB Migration completed.")
+
 }
