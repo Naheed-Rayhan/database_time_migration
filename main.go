@@ -46,7 +46,7 @@ func main() {
 	coll1 := Database.GetCollection(client, "live-exam-dev", "model_tests")
 	// List of fields to process and if maxUpdate is -1 then it will update all the documents
 	fieldsToProcess = []string{"exam_date", "result_publish_time", "created_at", "updated_at"}
-	Utils.MigrateBDT2UTC_mongoDB(coll1, 0, fieldsToProcess, bson.M{})
+	Utils.MigrateBDT2UTC_mongoDB_bulk(coll1, 1, fieldsToProcess, bson.M{})
 
 	//coll2 := Database.GetCollection(client, "live-exam-dev", "model_test_session")
 	//// List of fields to process and if maxUpdate is -1 then it will update all the documents

@@ -99,6 +99,89 @@ func MigrateBDT2UTC_mongoDB(collection *mongo.Collection, maxUpdates int, fields
 	log.Printf("Migration completed. Updated %d documents.\n", updateCount)
 }
 
+func MigrateBDT2UTC_mongoDB_bulk(collection *mongo.Collection, maxUpdates int, fieldsToProcess []string, filter bson.M) {
+	// Context with timeout for better resource management
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	// Step 1: Fetch documents in batches
+	cursor, err := collection.Find(ctx, filter)
+	if err != nil {
+		log.Fatal("Failed to fetch documents:", err)
+	}
+	defer cursor.Close(ctx)
+
+	// Bulk operation setup
+	var bulkOps []mongo.WriteModel
+	updateCount := 0
+
+	// Process each document in the cursor
+	for cursor.Next(ctx) {
+		if updateCount >= maxUpdates && maxUpdates != -1 {
+			fmt.Printf("Stopped after updating %d documents (maxUpdates limit reached).\n", maxUpdates)
+			break
+		}
+
+		var doc bson.M
+		if err := cursor.Decode(&doc); err != nil {
+			log.Printf("Skipping document due to decoding error: %v\n", err)
+			continue
+		}
+
+		updatePayload := bson.M{}
+		hasUpdates := false
+
+		// Process fields
+		for _, field := range fieldsToProcess {
+			if fieldValue, ok := doc[field]; ok {
+				if dateTime, valid := fieldValue.(primitive.DateTime); valid {
+					// Convert and adjust time
+					newTime := dateTime.Time().Add(-6 * time.Hour)
+					updatePayload[field] = newTime
+					hasUpdates = true
+				}
+			}
+		}
+
+		// If no fields were updated, skip document
+		if !hasUpdates {
+			continue
+		}
+
+		// Prepare bulk update operation
+		filter := bson.M{"_id": doc["_id"]}
+		update := bson.M{"$set": updatePayload}
+		bulkOps = append(bulkOps, mongo.NewUpdateOneModel().SetFilter(filter).SetUpdate(update))
+
+		// Execute batch update every 100 operations (adjustable)
+		if len(bulkOps) >= 100 {
+			res, err := collection.BulkWrite(ctx, bulkOps)
+			if err != nil {
+				log.Printf("Bulk update failed: %v\n", err)
+			} else {
+				updateCount += int(res.ModifiedCount)
+			}
+			bulkOps = nil // Reset batch
+		}
+	}
+
+	// Process remaining bulk operations
+	if len(bulkOps) > 0 {
+		res, err := collection.BulkWrite(ctx, bulkOps)
+		if err != nil {
+			log.Printf("Final bulk update failed: %v\n", err)
+		} else {
+			updateCount += int(res.ModifiedCount)
+		}
+	}
+
+	if err := cursor.Err(); err != nil {
+		log.Fatal("Cursor error:", err)
+	}
+
+	log.Printf("Migration completed. Updated %d documents.\n", updateCount)
+}
+
 func MigrateBDT2UTC_arangoDB(ctx context.Context, fieldsToProcess []string, offset int, limit int, db arangodb.Database, collectionName string) {
 	// Construct the AQL query for batch updates
 	updateStatements := `"__tm": true,` // Add the __tm field
