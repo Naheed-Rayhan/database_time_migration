@@ -40,23 +40,6 @@ func main() {
 	//
 	fieldsToProcess := []string{}
 
-	//-------------------------------------------ArangoDB-------------------------------------------------
-
-	arangoDBendpointURL := os.Getenv("ARANGODB_URI")
-	arangoDBusername := os.Getenv("ARANGODB_USERNAME")
-	arangoDBpassword := os.Getenv("ARANGODB_PASSWORD")
-
-	// Connecting to ArangoDB
-	client2, err := Database.ConnectToArangoDB(context.Background(), arangoDBendpointURL, arangoDBusername, arangoDBpassword)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// getting the database and collection
-	db, coll := Database.GetDBandCollection(client2, "shikho", "accounts")
-	fieldsToProcess = []string{"created_at", "otp_sent_time"} // Change the field name
-	Utils.MigrateBDT2UTC_arangoDB(context.Background(), fieldsToProcess, 3, db, coll, "accounts")
-
 	//-------------------------------------------MongoDB-------------------------------------------------
 
 	// getting the collection
@@ -94,5 +77,23 @@ func main() {
 	//// List of fields to process and if maxUpdate is -1 then it will update all the documents
 	//fieldsToProcess = []string{"start_time", "end_time", "created_at", "updated_at"}
 	//Utils.MigrateBDT2UTC_mongoDB(coll7, 1, fieldsToProcess, bson.M{"content_type": "HomeWork", "content_sub_type": "Quiz"})
+
+	//-------------------------------------------ArangoDB-------------------------------------------------
+
+	arangoDBendpointURL := os.Getenv("ARANGODB_URI")
+	arangoDBusername := os.Getenv("ARANGODB_USERNAME")
+	arangoDBpassword := os.Getenv("ARANGODB_PASSWORD")
+
+	// Connecting to ArangoDB
+	client2, err := Database.ConnectToArangoDB(context.Background(), arangoDBendpointURL, arangoDBusername, arangoDBpassword)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// getting the database and collection
+	db := Database.GetDB(client2, "shikho")
+	fieldsToProcess = []string{"created_at", "otp_sent_time"} // Change the field name
+	//Utils.MigrateBDT2UTC_arangoDB(context.Background(), fieldsToProcess, 3, db, "accounts")
+	Utils.MigrateBDT2UTC_arangoDB2(context.Background(), fieldsToProcess, 1, db, "accounts")
 
 }

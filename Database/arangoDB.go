@@ -27,18 +27,12 @@ func ConnectToArangoDB(ctx context.Context, endpointURL string, username string,
 
 }
 
-func GetDBandCollection(client arangodb.Client, dbName string, collectionName string) (arangodb.Database, arangodb.Collection) {
+func GetDB(client arangodb.Client, dbName string) arangodb.Database {
 	// Select database
 	db, err := client.Database(nil, dbName) // Change database name
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
 
-	//Select collection
-	collection, err := db.Collection(nil, collectionName) // Change collection name
-	if err != nil {
-		log.Fatalf("Failed to open collection: %v", err)
-	}
-
-	return db, collection
+	return db
 }

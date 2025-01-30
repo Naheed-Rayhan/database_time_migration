@@ -8,6 +8,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"log"
+	"strings"
 	"time"
 )
 
@@ -99,7 +100,14 @@ func MigrateBDT2UTC_mongoDB(collection *mongo.Collection, maxUpdates int, fields
 	log.Printf("Migration completed. Updated %d documents.\n", updateCount)
 }
 
-func MigrateBDT2UTC_arangoDB(ctx context.Context, fieldsToProcess []string, maxUpdates int, db arangodb.Database, collection arangodb.Collection, collectionName string) {
+func MigrateBDT2UTC_arangoDB(ctx context.Context, fieldsToProcess []string, maxUpdates int, db arangodb.Database, collectionName string) {
+
+	//Select collection
+	collection, err := db.Collection(nil, collectionName) // Change collection name
+	if err != nil {
+		log.Fatalf("Failed to open collection: %v", err)
+	}
+
 	filterConditions := ""
 	for i, field := range fieldsToProcess {
 		if i > 0 {
@@ -129,6 +137,7 @@ func MigrateBDT2UTC_arangoDB(ctx context.Context, fieldsToProcess []string, maxU
 			break
 		}
 
+		//imporvement
 		var doc map[string]interface{}
 		meta, err := cursor.ReadDocument(ctx, &doc)
 		if err != nil {
@@ -161,4 +170,58 @@ func MigrateBDT2UTC_arangoDB(ctx context.Context, fieldsToProcess []string, maxU
 	log.Printf("Total documents updated: %d\n", updateCount)
 	log.Println("arangoDB Migration completed.")
 
+}
+
+func MigrateBDT2UTC_arangoDB2(ctx context.Context, fieldsToProcess []string, maxUpdates int, db arangodb.Database, collectionName string) {
+	//collection, err := db.Collection(nil, collectionName)
+	//if err != nil {
+	//	log.Fatalf("Failed to open collection: %v", err)
+	//}
+
+	// Construct the AQL query for batch updates
+	updateStatements := ""
+	for _, field := range fieldsToProcess {
+		updateStatements += fmt.Sprintf(` "%s": DATE_SUBTRACT(doc.%s, 6, "hour"),`, field, field)
+	}
+	updateStatements = updateStatements[:len(updateStatements)-1] // Remove last comma
+
+	query := fmt.Sprintf(`
+		FOR doc IN %s 
+		FILTER %s
+		
+		LIMIT %d
+		UPDATE doc WITH { %s } IN %s 
+		RETURN { updated: NEW._key }
+	`, collectionName, generateFilter(fieldsToProcess), maxUpdates, updateStatements, collectionName)
+
+	cursor, err := db.Query(ctx, query, nil)
+	if err != nil {
+		log.Fatalf("Query failed: %v", err)
+	}
+	defer cursor.Close()
+
+	// Track updates
+	updateCount := 0
+	for cursor.HasMore() {
+		var result map[string]string
+		_, err := cursor.ReadDocument(ctx, &result)
+		if err != nil {
+			log.Printf("Failed to read update result: %v", err)
+			continue
+		}
+		fmt.Printf("Updated document: %s\n", result["updated"])
+		updateCount++
+	}
+
+	log.Printf("Total documents updated: %d\n", updateCount)
+	log.Println("ArangoDB Migration completed.")
+}
+
+// Helper function to generate dynamic filter conditions
+func generateFilter(fields []string) string {
+	conditions := []string{}
+	for _, field := range fields {
+		conditions = append(conditions, fmt.Sprintf(`doc.%s != null`, field))
+	}
+	return strings.Join(conditions, " AND ")
 }
