@@ -93,7 +93,6 @@ func main() {
 	// getting the database and collection
 	db := Database.GetDB(client2, "shikho")
 	fieldsToProcess = []string{"created_at", "otp_sent_time"} // Change the field name
-	//Utils.MigrateBDT2UTC_arangoDB(context.Background(), fieldsToProcess, 3, db, "accounts")
-	Utils.MigrateBDT2UTC_arangoDB2(context.Background(), fieldsToProcess, 1, db, "accounts")
+	Utils.MigrateBDT2UTC_arangoDB(context.Background(), fieldsToProcess, 100, 1, db, "accounts")
 
 }
